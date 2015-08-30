@@ -1,5 +1,4 @@
 /*
-
    barometer.ino - Piccolino Pressure & Temperature display using the BMP180 sensor add-on
    Visit http://piccolino.rocks to get this low cost sensor and add it to your Piccolino!
    
@@ -18,10 +17,15 @@
 #include <SPI.h>
 #include <Piccolino_OLED.h>
 #include <Piccolino_RAM.h>
-#include <SFE_BMP180.h>
+#include "DHT.h"
+
+#define DHTPIN A0     // what pin we're connected to
+#define DHTTYPE DHT11   // DHT 11
+DHT dht(DHTPIN, DHTTYPE);
+//#include <SFE_BMP180.h>
 
 // You will need to create an SFE_BMP180 object, here called "pressure":
-SFE_BMP180 pressure;
+//SFE_BMP180 pressure;
 
 // Piccolino OLED driver
 Piccolino_OLED oled;
@@ -176,7 +180,6 @@ double T,P,p0,p1;
 int looper=0;
 byte local_buff[129];
 
-
 // ---------------------------------- peogram starts here ----------------------------------------------
 
 void drawBitmap(int16_t x, int16_t y, const unsigned char *bitmap, int16_t w, int16_t h) 
@@ -195,10 +198,10 @@ void ShowTemp(char x,char y)
 {
       oled.setCursor(x-36,y);
       oled.setTextSize(3);
-      oled.print(round((9.0/5.0)*T+32.0)); // don't print decimals
+      oled.print(round(T)); // don't print decimals
       oled.setCursor(x,y+1);
       oled.setTextSize(1);
-      oled.println("F");
+      oled.println("C");
 }
 
 void setup()
@@ -207,150 +210,79 @@ void setup()
   //power sensor via A2 (just above 3v is enough)
   pinMode(A2,OUTPUT);
   digitalWrite(A2,HIGH);
-  
-  ram.begin();  
-  memset(local_buff,0,128);
-  ram.write(0,local_buff,128);
-  
+
   oled.begin();
   oled.clear();
   oled.print(F("Init..."));
-  oled.update();
-  
   // Initialize the sensor (it is important to get calibration values stored on the device).
-
-  if (pressure.begin()) {
-    oled.println(F("Ok!"));
-    oled.update();
-  }  else
-  {
-    // Oops, something went wrong, this is usually a connection problem,
-    // see the comments at the top of this sketch for the proper connections.
-
-    oled.println(F("FAILED"));
-    oled.update();
-    while(1)
-      delay(10000); // Pause forever.
-  }
+  dht.begin();
+  oled.update();
+  delay(2000);
+  oled.println(F("Ok!"));
+  oled.update();
   Serial.begin(9600);
 }
-
+float h ;
+float t;
+float hic ;
 void loop()
 {
-  char status;
-  char p2;
-
-  oled.clear();
-
-  // You must first get a temperature measurement to perform a pressure reading.
- 
-  // Start a temperature measurement:
-  // If request is successful, the number of ms to wait is returned.
-  // If request is unsuccessful, 0 is returned.
-
-  status = pressure.startTemperature();
-  if (status != 0)
-  {
+    Serial.print(F("LOOP\n"));
+    oled.clear();
     // Wait for the measurement to complete:
-    delay(status);
+    delay(1000);
+  //  Serial.print(F("READING TEMP\n"));
+    T = dht.readTemperature();
+//    Serial.print(F("READ TEMP!\n"));
+    ShowTemp(36,0);  
+    delay(1000);
+    h = dht.readHumidity();
+    if (!isnan(h) && !isnan(T)) 
+    {
+      hic = dht.computeHeatIndex(T, h, false);// * 1.5;
+      Serial.print(F("Humidity: "));
+      Serial.print(h);
+      Serial.print(F("\n"));
+      Serial.print(F("Temperature: "));
+      Serial.print(T);
+      Serial.print(F(" *C \n"));
+      // Print out the measurement:
+      oled.setCursor(55,0);
+      oled.setTextSize(2);
+      oled.print(h);
+      oled.setTextSize(1);
+      oled.setCursor(114,8);
+      oled.println(F("%"));
 
-    // Retrieve the completed temperature measurement:
-    // Note that the measurement is stored in the variable T.
-    // Function returns 1 if successful, 0 if failure.
-    
-    if (pressure.getTemperature(T))
-        ShowTemp(36,0);  
-
-  }
-  
-      if (status = pressure.startPressure(3))
-      {
-        // Wait for the measurement to complete:
-        delay(status);
-
-        // Retrieve the completed pressure measurement:
-        // Note that the measurement is stored in the variable P.
-        // Note also that the function requires the previous temperature measurement (T).
-        // (If temperature is stable, you can do one temperature measurement for a number of pressure measurements.)
-        // Function returns 1 if successful, 0 if failure.
-
-        // The pressure sensor returns abolute pressure, which varies with altitude.
-        // To remove the effects of altitude, use the sealevel function and your current altitude.
-        // This number is commonly used in weather reports.
-
-        if (pressure.getPressure(P,T))
-        {
-          // Print out the measurement:
-          oled.setCursor(55,0);
-          oled.setTextSize(2);
-          
-          p0 = pressure.sealevel(P,ALTITUDE); // corrected for your actual altitude
-          p0*=0.0295333727;
-          
-          oled.print(p0);
-          oled.setTextSize(1);
-          oled.setCursor(114,8);
-          oled.println(F("in"));
-          
-          oled.setCursor(60,19);
-          oled.print(p0,2);
-          oled.print(F(" mb"));
-
-        }
-      }
-
-      // draw legend
-      oled.setCursor(0,36);
-      oled.print(F("    RAIN      FAIR"));
-      oled.setCursor(0,56);
-      oled.print(F("STORM   CHANGE   DRY"));
+      oled.setCursor(60,19);
+      oled.print(hic);
+      oled.print(F(" heat"));
+      oled.fillRect(0,48,h,5,WHITE); // draw bar
+      oled.setCursor(h+2,45);
+      oled.setTextSize(1);
+      oled.print("Temp");
       
-      p1=p0-28; // p0 = inHg - min of scale   (typical barometer range is 27.8 - 31.2 but we just track top part for better visualization on the graph)      
-      p1*=10; // range is now 32 max
-      p2=round(p1*100/32); // get percent of bar to be filled based on 128 pixels width 
-      oled.fillRect(0,48,p2,5,WHITE); // draw bar
+      oled.fillRect(0,54,T,5,WHITE); // draw bar
+      oled.setCursor(T+2,53);
+      oled.setTextSize(1);
+      oled.print("Wilg");
 
       // separation line in the middle of the screen
       oled.drawLine(0,32,127,32,WHITE);
-      
       oled.update();  
-      
       delay(1000); //wait 1 sec
-
       looper++;
-
-     if(!(looper%300)) { // update history every 10 minutes (since we pause for 10 seconds every 10 seconds we only count 300 seconds)
-       ram.read(1,local_buff,127); // skip first location
-       local_buff[127]=14+(50-round(p2/2)); // scale output so that low pressure dips the graph down.
-       ram.write(0,local_buff,128); //keep the last 24 hours approx  (60*60*24)/128 pixels is about 11 minutes per dot
-       looper=0;
-     }
      
-     if(!(looper%10)) { // rotate screens every 10 seconds
-       unsigned char f;       
-       oled.clear();
-       
-       for(f=0; f<128; f++)
-         oled.drawPixel(f,local_buff[f],WHITE);
-         
-       oled.setCursor(43,0);
-       oled.setTextSize(1);
-       oled.print("HISTORY");
-       oled.setCursor(0,10);
-       oled.print("SUNNY");
-       oled.setCursor(0,54);
-       oled.print("STORMY");
-       oled.update();
-       delay(5000);
-       
-       oled.clear();
-       if(p0<28.7)            drawBitmap(64,0,chancetstorms,64,64);   
-       if(p0>28.69&&p0<29.5)  drawBitmap(64,0,partlycloudy,64,64);
-       if(p0>29.49&&p0<30.5)  drawBitmap(64,0,cloudy,64,64);
-       if(p0>30.49)           drawBitmap(64,0,sunny,64,64);
+     if(!(looper%10)) 
+     { // rotate screens every 10 seconds
+         oled.clear();
+//       if(p0<28.7)            drawBitmap(64,0,chancetstorms,64,64);   
+//       if(p0>28.69&&p0<29.5)  drawBitmap(64,0,partlycloudy,64,64);
+//       if(p0>29.49&&p0<30.5)  drawBitmap(64,0,cloudy,64,64);
+       if(T>24.00)           drawBitmap(64,0,sunny,64,64);
        ShowTemp(50,20);  
        oled.update();
        delay(5000);
      }     
+    }
 }
-
